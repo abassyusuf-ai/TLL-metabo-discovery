@@ -85,7 +85,8 @@ else:
             mz_col = c1.selectbox("m/z", df_in.columns, index=0)
             rt_col = c2.selectbox("RT", df_in.columns, index=1 if "RT_min" not in df_in.columns else df_in.columns.get_loc("RT_min"))
             sm_col = c3.selectbox("Sample ID", df_in.columns, index=df_in.columns.get_loc("Sample") if "Sample" in df_in.columns else 0)
-            in_col = c4.selectbox("Intensity", df_in.columns, index=df_input.columns.get_loc("Intensity") if "Intensity" in df_in.columns else 2)
+            # FIXED Line 88 below: Changed df_input to df_in
+            in_col = c4.selectbox("Intensity", df_in.columns, index=df_in.columns.get_loc("Intensity") if "Intensity" in df_in.columns else 2)
             
             f1, f2, f3, f4 = st.columns(4)
             mz_bin = f1.slider("Alignment", 1, 5, 3)
@@ -95,13 +96,12 @@ else:
 
         if st.button("Run Full Academic Pipeline"):
             try:
-                # 1. PROCESSING
+                # 1. PROCESSING logic
                 df_in['T_ID'] = df_in[mz_col].round(mz_bin).astype(str) + "_" + df_in[rt_col].round(2).astype(str)
                 pivot = df_in.pivot_table(index='T_ID', columns=sm_col, values=in_col, aggfunc='mean').fillna(0)
                 cleaned = pivot[(pivot != 0).sum(axis=1) >= (min_pres/100)*len(pivot.columns)]
                 if cleaned.empty: st.error("No features left."); st.stop()
                 
-                # Normalization & Scaling Math (Your Colab Logic)
                 min_v = (cleaned[cleaned > 0].min().min()) / 2
                 X_raw = cleaned.replace(0, min_v).div(cleaned.sum(axis=0), axis=1).T * 1000000
                 X_z = (X_raw - X_raw.mean()) / X_raw.std()
@@ -114,47 +114,47 @@ else:
 
                 # 2. STATS & ML
                 g1_m, g2_m = [g == unique_g[0] for g in groups], [g == unique_g[1] for g in groups]
-                _, pvals = ttest_ind(X_raw[g1_m], X_raw[g2_m], axis=0)
-                log2fc = np.log2(X_raw[g2_m].mean() / X_raw[g1_m].mean().replace(0, 0.001))
+                _, pvals = ttest_ind(X_raw.iloc[g1_m], X_raw.iloc[g2_m], axis=0)
+                log2fc = np.log2(X_raw.iloc[g2_m].mean() / X_raw.iloc[g1_m].mean().replace(0, 0.001))
                 stats_df = pd.DataFrame({'ID': X_raw.columns, 'p': pvals, 'Log2FC': log2fc}).fillna(0)
                 stats_df['Sig'] = (stats_df['p'] < 0.05) & (abs(stats_df['Log2FC']) > 1)
                 acc = cross_val_score(RandomForestClassifier(), X_scaled, [1 if g==unique_g[-1] else 0 for g in groups], cv=3).mean()
 
                 # 3. TABS (The Rich Suite)
-                t1, t2, t3, t4, t5, t6, t7 = st.tabs(["📊 Distributions", "🔵 PCA Gallery", "🎯 PLS-DA Suite", "🌋 Volcano", "🏆 Identification", "🔥 Heatmap", "📋 Report"])
+                t1, t2, t3, t4, t5, t6, t7 = st.tabs(["📊 Distributions", "🔵 PCA Gallery", "🎯 PLS-DA Suite", "🌋 Volcano Plot", "🏆 Identification", "🔥 Heatmap", "📋 Report"])
                 
-                with t1: # BOXPLOTS (Match Image 1)
+                with t1:
                     st.subheader("Normalization QC")
                     c_a, c_b = st.columns(2)
                     c_a.plotly_chart(px.box(X_raw.melt(), y='value', title="Raw TIC Normalized", color_discrete_sequence=['#66c2a5']))
                     c_b.plotly_chart(px.box(X_p.melt(), y='value', title="Pareto Scaled", color_discrete_sequence=['#fc8d62']))
 
-                with t2: # 4-PANEL PCA (Match Image 3)
+                with t2:
                     st.subheader("Scaling comparison for separation")
                     pca_cols = st.columns(2)
-                    for i, (n, d) in enumerate([("Raw", X_raw), ("Z-score", X_z), ("Pareto", X_p), ("Log2", np.log2(X_raw+1))]):
-                        coords = PCA(n_components=2).fit_transform(d)
+                    comparison_scaling = [("Raw", X_raw), ("Z-score", X_z), ("Pareto", X_p), ("Log2", np.log2(X_raw+1))]
+                    for i, (n, d) in enumerate(comparison_scaling):
+                        coords = PCA(n_components=2).fit_transform(d.fillna(0))
                         pca_cols[i%2].plotly_chart(px.scatter(x=coords[:,0], y=coords[:,1], color=groups, title=f"PCA: {n}"), use_container_width=True)
 
-                with t3: # PLS-DA Suite (Match Image 5 & 6)
+                with t3:
                     st.subheader("Supervised Discrimination & Importance")
                     y_bin = [1 if g == unique_g[-1] else 0 for g in groups]
                     pls = PLSRegression(n_components=2).fit(X_p, y_bin)
                     
                     c_1, c_2 = st.columns(2)
                     c_1.plotly_chart(px.scatter(x=pls.x_scores_[:,0], y=pls.x_scores_[:,1], color=groups, title="PLS-DA Scores Plot"))
-                    c_2.plotly_chart(px.scatter(x=pls.x_loadings_[:,0], y=pls.x_loadings_[:,1], title="Loadings Plot (Feature Weights)", opacity=0.5))
+                    c_2.plotly_chart(px.scatter(x=pls.x_loadings_[:,0], y=pls.x_loadings_[:,1], title="Loadings Plot (Feature Contributions)", opacity=0.5))
                     
-                    # VIP Scores logic (Simplified)
-                    vip = np.abs(pls.x_weights_[:, 0]) # LV1 importance
+                    vip = np.abs(pls.x_weights_[:, 0])
                     vip_df = pd.DataFrame({'ID': X_raw.columns, 'VIP': vip}).sort_values('VIP', ascending=False).head(20)
                     st.plotly_chart(px.bar(vip_df, x='ID', y='VIP', title="Top 20 Features by VIP Score (LV1)"))
 
-                with t4: # Volcano (Match Image 4)
+                with t4:
                     st.plotly_chart(px.scatter(stats_df, x='Log2FC', y=-np.log10(stats_df['p']+1e-10), color='Sig', hover_name='ID', 
                                               color_discrete_map={True:'red', False:'gray'}, title="Volcano Discovery Plot"))
                 
-                with t5: # ID with PubChem
+                with t5:
                     hits = stats_df[stats_df['Sig']].copy()
                     hits['m/z'] = hits['ID'].apply(lambda x: float(x.split('_')[0]))
                     hits['Neutral Mass'] = (hits['m/z'] + 1.0078) if ion_mode.startswith("Neg") else (hits['m/z'] - 1.0078)
@@ -162,7 +162,7 @@ else:
                     hits['Identify'] = hits['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
                     st.dataframe(hits[['ID', 'Neutral Mass', 'Confidence', 'Log2FC', 'Identify']], column_config={"Identify": st.column_config.LinkColumn()})
 
-                with t6: # Heatmap
+                with t6:
                     st.plotly_chart(px.imshow(X_p.T.head(100), title="Top 100 Features Heatmap"), use_container_width=True)
 
                 with t7:
