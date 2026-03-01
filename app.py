@@ -19,7 +19,7 @@ st.set_page_config(page_title="TLL Metabo-Discovery", layout="wide")
 st.sidebar.title("TLL Metabo-Discovery")
 st.sidebar.info("""
 **Research Pipeline**  
-Standardized bioinformatics ecosystem for high-throughput untargeted metabolomics discovery.
+Integrated bioinformatics ecosystem for high-throughput untargeted metabolomics discovery.
 """)
 
 st.sidebar.markdown("---")
@@ -33,7 +33,7 @@ st.sidebar.caption("Yusuf, A. (2026). TLL Metabo-Discovery: An Integrated Pipeli
 st.sidebar.markdown("---")
 st.sidebar.caption("Developed by Abass Yusuf | Laboratory Support")
 
-# --- 3. HELPER: PDF GENERATOR ---
+# --- 3. HELPER: ACADEMIC PDF GENERATOR ---
 def create_academic_report(g1, g2, feat_count, accuracy, leads_count):
     pdf = FPDF()
     pdf.add_page()
@@ -44,10 +44,10 @@ def create_academic_report(g1, g2, feat_count, accuracy, leads_count):
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 10, "1. Executive Summary", ln=True)
     pdf.set_font("Helvetica", "", 11)
-    summary = (f"The analysis successfully identified metabolic differences between cohort {g1} and {g2}. "
+    summary = (f"The analysis identified metabolic differences between cohort {g1} and {g2}. "
                f"A total of {feat_count} features were analyzed post-filtration. "
-               f"Prioritization identified {leads_count} features with high discovery confidence. "
-               f"Predictive validation (Random Forest) achieved an accuracy of {accuracy:.1%}.")
+               f"Identification found {leads_count} high-confidence biomarkers (Level 2). "
+               f"Random Forest Validation Accuracy: {accuracy:.1%}.")
     pdf.multi_cell(0, 10, summary)
     
     pdf.ln(10)
@@ -110,7 +110,7 @@ else:
             
             f1, f2, f3, f4 = st.columns(4)
             mz_bin = f1.slider("m/z Alignment Tolerance", 1, 5, 3)
-            min_pres = f2.slider("Min Presence (%)", 0, 100, 80)
+            min_pres = f2.slider("Min Presence Filter (%)", 0, 100, 80)
             ion_mode = f3.selectbox("Ionization Polarity", ["Negative [M-H]-", "Positive [M+H]+"])
             scaling = f4.selectbox("Scaling Method", ["Pareto Scaling", "Auto-Scaling", "None"])
 
@@ -135,52 +135,58 @@ else:
                 
                 stats_ready = False
                 if len(unique_g) >= 2:
+                    y_labels = [1 if g == unique_g[-1] else 0 for g in groups]
                     g1_c, g2_c = [c for c in tic_norm.columns if c.startswith(unique_g[0])], [c for c in tic_norm.columns if c.startswith(unique_g[1])]
                     _, pvals = ttest_ind(tic_norm[g1_c], tic_norm[g2_c], axis=1)
                     log2fc = np.log2(tic_norm[g2_c].mean(axis=1) / tic_norm[g1_c].mean(axis=1).replace(0, 0.001))
                     stats_df = pd.DataFrame({'ID': tic_norm.index, 'p': pvals, 'log10p': -np.log10(pvals), 'Log2FC': log2fc}).reset_index(drop=True)
                     stats_df['Significant'] = (stats_df['p'] < 0.05) & (abs(stats_df['Log2FC']) > 1)
-                    y_ml = [1 if g == unique_g[-1] else 0 for g in groups]
-                    acc = cross_val_score(RandomForestClassifier(), X_s.fillna(0), y_ml, cv=3).mean()
+                    
+                    acc = cross_val_score(RandomForestClassifier(), X_s.fillna(0), y_labels, cv=3).mean()
                     stats_ready = True
 
                 # 3. TABS
-                t1, t2, t3, t4, t5 = st.tabs(["📊 Distribution", "🔵 PCA", "🌋 Discovery", "🏆 Identification", "📋 Summary"])
+                t1, t2, t3, t4, t5, t6 = st.tabs(["📊 Distribution", "🔵 PCA", "🎯 PLS-DA", "🌋 Discovery", "🏆 Identification", "📋 Summary"])
                 
                 with t1: st.plotly_chart(px.box(X.melt(), y='value', title="TIC Normalization QC"), use_container_width=True)
                 with t2: st.plotly_chart(px.scatter(x=pca_res[:,0], y=pca_res[:,1], color=groups, title="Unsupervised PCA Analysis"), use_container_width=True)
-                with t3:
+                
+                with t3: # --- PLS-DA TAB ---
+                    if stats_ready:
+                        pls = PLSRegression(n_components=2).fit(X_s.fillna(0), y_labels)
+                        st.plotly_chart(px.scatter(x=pls.x_scores_[:,0], y=pls.x_scores_[:,1], color=groups, title="Supervised PLS-DA Separation"), use_container_width=True)
+                    else: st.warning("Supervised PLS-DA requires at least 2 groups.")
+
+                with t4:
                     if stats_ready: st.plotly_chart(px.scatter(stats_df, x='Log2FC', y='log10p', color='Significant', hover_name='ID', title="Biomarker Discovery Plot"), use_container_width=True)
                 
-                with t4:
+                with t5:
                     if stats_ready:
-                        st.subheader("Automated Identification")
+                        st.subheader("Identification and Confidence Scoring")
                         hits = stats_df[stats_df['Significant']].copy()
                         hits['m/z'] = hits['ID'].apply(lambda x: float(x.split('_')[0]))
                         hits['Neutral Mass'] = (hits['m/z'] + 1.0078) if ion_mode.startswith("Neg") else (hits['m/z'] - 1.0078)
                         
-                        # --- UPDATED SIMPLIFIED CONFIDENCE SCORING ---
                         def score_confidence(row):
-                            lv = 3 # Default: Mass + Stats confirmed
-                            if row['Neutral Mass'] < 500: lv = 2 # High likelihood (Drug-like MW)
-                            # Level 1 is reserved for external MS2 validation (added manually later)
+                            lv = 3 # Significant
+                            if row['Neutral Mass'] < 500: lv = 2 # Physiochemical likelihood
                             return f"Level {lv}"
                         
                         hits['Confidence'] = hits.apply(score_confidence, axis=1)
-                        hits['Search PubChem'] = hits['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
+                        hits['PubChem Search'] = hits['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
                         
-                        st.dataframe(hits[['ID', 'Neutral Mass', 'Confidence', 'Log2FC', 'Search PubChem']], 
-                                     column_config={"Search PubChem": st.column_config.LinkColumn("Identify")})
-                        st.info("Confidence Logic: L2 (Physicochemical Likelihood), L3 (Statistically Significant), L4 (Mass Match Only)")
+                        st.dataframe(hits[['ID', 'Neutral Mass', 'Confidence', 'Log2FC', 'PubChem Search']], 
+                                     column_config={"PubChem Search": st.column_config.LinkColumn("Identify")})
+                        st.info("Confidence Logic: L2 (Drug-like MW), L3 (Statistically Significant), L4 (Mass Match Only)")
 
-                with t5:
+                with t6:
                     if stats_ready:
                         st.metric("Model Predictive Accuracy", f"{acc:.1%}")
                         pdf_data = create_academic_report(unique_g[0], unique_g[1], len(cleaned), acc, len(hits[hits['Confidence'] == 'Level 2']))
                         st.download_button("Download Research Summary (PDF)", pdf_data, "Metabo_Research_Report.pdf", "application/pdf")
                 
                 st.balloons()
-            except Exception as e: st.error(f"Error: {e}")
+            except Exception as e: st.error(f"Analysis Error: {e}")
 
 st.markdown("---")
-st.caption("Internal Research Dashboard | Authorized Lab Use Only")
+st.caption("Internal Research Dashboard | Laboratory Use Only")
