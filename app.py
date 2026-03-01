@@ -85,35 +85,38 @@ else:
         if metadata_file:
             sep = '\t' if metadata_file.name.endswith('.txt') else ','
             df_meta = pd.read_csv(metadata_file, sep=sep)
-            st.success("Metadata Loaded")
+            st.success("Metadata Loaded Successfully")
 
         with st.expander("Parameters & Mapping Configuration"):
             col1, col2, col3, col4 = st.columns(4)
-            mz_col = col1.selectbox("m/z", df_in.columns, index=0)
-            rt_col = col2.selectbox("RT", df_in.columns, index=1 if "RT_min" not in df_in.columns else df_in.columns.get_loc("RT_min"))
+            mz_col = col1.selectbox("m/z Column", df_in.columns, index=0)
+            rt_col = col2.selectbox("RT Column", df_in.columns, index=1 if "RT_min" not in df_in.columns else df_in.columns.get_loc("RT_min"))
             sample_col = col3.selectbox("Sample ID", df_in.columns, index=df_in.columns.get_loc("Sample") if "Sample" in df_in.columns else 0)
-            in_col = col4.selectbox("Intensity", df_in.columns, index=df_in.columns.get_loc("Intensity") if "Intensity" in df_in.columns else 2)
+            in_col = col4.selectbox("Intensity Column", df_in.columns, index=df_in.columns.get_loc("Intensity") if "Intensity" in df_in.columns else 2)
             
             st.markdown("---")
             meta_link, group_col = None, None
             if df_meta is not None:
                 m1, m2 = st.columns(2)
                 meta_link = m1.selectbox("Link Metadata via column:", df_meta.columns, index=0)
-                group_col = m2.selectbox("Grouping column:", df_meta.columns, index=min(1, len(df_meta.columns)-1))
+                group_col = m2.selectbox("Grouping column (e.g. CLASS_plant):", df_meta.columns, index=min(1, len(df_meta.columns)-1))
             
             f1, f2, f3, f4 = st.columns(4)
-            mz_bin = f1.slider("Alignment", 1, 5, 3)
-            min_pres = f2.slider("Min Presence %", 0, 100, 80)
-            ion_mode = f3.selectbox("Polarity", ["Negative [M-H]-", "Positive [M+H]+"])
-            scaling = f4.selectbox("Method", ["Pareto Scaling", "Auto-Scaling", "None"])
+            mz_bin = f1.slider("Alignment Precision", 1, 5, 3)
+            min_pres = f2.slider("Min Presence Filter %", 0, 100, 80)
+            ion_mode = f3.selectbox("Ionization Polarity", ["Negative [M-H]-", "Positive [M+H]+"])
+            scaling = f4.selectbox("Statistical Scaling", ["Pareto Scaling", "Auto-Scaling", "None"])
 
         if st.button("Run Full Academic Pipeline"):
             try:
-                # 1. Processing
-                df_in['T_ID'] = df_in[mz_col].round(mz_bin).astype(str) + "_" + df_in[rt_col].round(2).astype(str)
-                pivot = df_in.pivot_table(index='T_ID', columns=sample_col, values=in_col, aggfunc='mean').fillna(0)
+                # 1. Processing Logic
+                df_in['ID'] = df_in[mz_col].round(mz_bin).astype(str) + "_" + df_in[rt_col].round(2).astype(str)
+                pivot = df_in.pivot_table(index='ID', columns=sample_col, values=in_col, aggfunc='mean').fillna(0)
                 cleaned = pivot[(pivot != 0).sum(axis=1) >= (min_pres/100)*len(pivot.columns)]
-                if cleaned.empty: st.error("No features left. Lower Min Presence."); st.stop()
+                
+                if cleaned.empty: 
+                    st.error("Filtering error: Zero features remaining. Please lower 'Min Presence %'.")
+                    st.stop()
                 
                 min_v = (cleaned[cleaned > 0].min().min()) / 2
                 X_raw = cleaned.replace(0, min_v).div(cleaned.sum(axis=0), axis=1).T * 1000000
@@ -127,16 +130,15 @@ else:
                     groups = [str(s).split('_')[0] for s in X_raw.index]
                 
                 unique_g = sorted(list(set(groups)))
-                # Define y_bin for Supervised analysis
                 y_bin = [1 if g == unique_g[-1] else 0 for g in groups]
 
-                # 3. Scaling
+                # 3. Scaling Math
                 X_z = (X_raw - X_raw.mean()) / X_raw.std()
                 X_p = (X_raw - X_raw.mean()) / np.sqrt(X_raw.std().replace(0, np.nan))
                 X_scaled = X_p if scaling == "Pareto Scaling" else (X_z if "Auto" in scaling else X_raw)
                 X_scaled = X_scaled.fillna(0).loc[:, X_scaled.std() > 0]
 
-                # 4. Initialize result containers for Tabs
+                # 4. Initialize result containers
                 stats_ready = False
                 stats_df = pd.DataFrame()
                 hits = pd.DataFrame()
@@ -152,54 +154,57 @@ else:
                     acc = cross_val_score(RandomForestClassifier(), X_scaled, y_bin, cv=3).mean()
                     stats_ready = True
 
-                # 5. TABS
+                # 5. TABS INTERFACE
                 t1, t2, t3, t4, t5, t6, t7 = st.tabs(["📊 Distribution", "🔵 PCA", "🎯 PLS-DA", "🌋 Volcano", "🏆 Identification", "🔗 Export", "📋 Report"])
                 
-                with t1: st.plotly_chart(px.box(X_raw.melt(), y='value', title="Data QC (TIC Normalized)"))
+                with t1: st.plotly_chart(px.box(X_raw.melt(), y='value', title="Data QC: TIC Normalized"), use_container_width=True)
                 with t2:
-                    coords = PCA(n_components=2).fit_transform(X_scaled)
-                    st.plotly_chart(px.scatter(x=coords[:,0], y=coords[:,1], color=groups, title="Unsupervised PCA"))
+                    pca_coords = PCA(n_components=2).fit_transform(X_scaled)
+                    st.plotly_chart(px.scatter(x=pca_coords[:,0], y=pca_coords[:,1], color=groups, title=f"Unsupervised PCA ({scaling})"), use_container_width=True)
                 
                 with t3:
                     if stats_ready:
                         pls = PLSRegression(n_components=2).fit(X_scaled, y_bin)
-                        st.plotly_chart(px.scatter(x=pls.x_scores_[:,0], y=pls.x_scores_[:,1], color=groups, title="Supervised PLS-DA"))
-                    else: st.warning("Need 2 groups for PLS-DA.")
+                        st.plotly_chart(px.scatter(x=pls.x_scores_[:,0], y=pls.x_scores_[:,1], color=groups, title="Supervised PLS-DA Separation"), use_container_width=True)
+                    else: st.warning("At least 2 groups required for supervised modeling.")
 
                 with t4:
                     if stats_ready:
-                        st.plotly_chart(px.scatter(stats_df, x='Log2FC', y=-np.log10(stats_df['p']+1e-10), color='Sig', hover_name='ID', title="Volcano Plot"))
+                        st.plotly_chart(px.scatter(stats_df, x='Log2FC', y=-np.log10(stats_df['p']+1e-10), color='Sig', hover_name='ID', title="Volcano Discovery Plot"), use_container_width=True)
                 
                 with t5:
                     if stats_ready and not hits.empty:
+                        st.subheader("Identification and Confidence Scoring")
                         hits['m/z'] = hits['ID'].apply(lambda x: float(x.split('_')[0]))
                         hits['Neutral'] = (hits['m/z'] + 1.0078) if ion_mode.startswith("Neg") else (hits['m/z'] - 1.0078)
                         hits['Identify'] = hits['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
                         hits['Confidence'] = hits['Neutral'].apply(lambda x: "Level 2" if x < 500 else "Level 3")
-                        st.dataframe(hits[['ID', 'Neutral', 'Confidence', 'Log2FC', 'p', 'Identify']], column_config={"Identify": st.column_config.LinkColumn()})
+                        st.dataframe(hits[['ID', 'Neutral', 'Confidence', 'Log2FC', 'p', 'Identify']], column_config={"Identify": st.column_config.LinkColumn()}, use_container_width=True)
+                    else: st.info("No significant features identified for structural prioritization.")
 
                 with t6:
-                    st.subheader("Platform Export")
+                    st.subheader("Platform Export Hub")
                     gnps_table = X_raw.T.copy().reset_index()
+                    # FIX: Synchronized naming for GNPS columns
                     gnps_table.insert(0, 'row ID', range(1, len(gnps_table) + 1))
                     gnps_table.insert(1, 'row m/z', gnps_table['ID'].apply(lambda x: x.split('_')[0]))
                     gnps_table.insert(2, 'row RT', gnps_table['ID'].apply(lambda x: x.split('_')[1]))
-                    gnps_meta = pd.DataFrame({'filename': X_raw.index, 'Group': groups})
+                    gnps_meta = pd.DataFrame({'filename': X_raw.index, 'ATTRIBUTE_Group': groups})
                     
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.download_button("📥 Download GNPS Table", gnps_table.to_csv(index=False).encode('utf-8'), "gnps_quant.csv")
-                        st.download_button("📥 Download GNPS Metadata", gnps_meta.to_csv(index=False, sep='\t').encode('utf-8'), "gnps_meta.txt")
-                    with c2:
-                        if stats_ready:
-                            st.download_button("📥 Download SIRIUS List", hits[['m/z', 'Log2FC', 'p']].to_csv(index=False).encode('utf-8'), "sirius.csv")
+                    c_e1, c_e2 = st.columns(2)
+                    with c_e1:
+                        st.download_button("📥 GNPS Feature Table", gnps_table.to_csv(index=False).encode('utf-8'), "GNPS_quant.csv")
+                        st.download_button("📥 GNPS Metadata (TXT)", gnps_meta.to_csv(index=False, sep='\t').encode('utf-8'), "GNPS_metadata.txt")
+                    with c_e2:
+                        if stats_ready and not hits.empty:
+                            st.download_button("📥 SIRIUS Mass List", hits[['m/z', 'Log2FC', 'p']].to_csv(index=False).encode('utf-8'), "sirius_list.csv")
 
                 with t7:
                     if stats_ready:
-                        st.metric("Model Accuracy", f"{acc:.1%}")
+                        st.metric("Discovery Validation Accuracy", f"{acc:.1%}")
                         pdf_data = create_academic_report(unique_g[0], unique_g[1], len(cleaned), acc, len(hits))
-                        st.download_button("Download Report (PDF)", pdf_data, "Report.pdf", "application/pdf")
+                        st.download_button("Download Report (PDF)", pdf_data, "Metabo_Research_Report.pdf", "application/pdf")
                 st.balloons()
             except Exception as e: st.error(f"Analysis Error: {e}")
 
-st.caption("Authorized Lab Use Only")
+st.caption("Authorized Lab Use | Standardized Research Pipeline")
