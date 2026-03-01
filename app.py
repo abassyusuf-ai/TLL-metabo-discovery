@@ -1,227 +1,193 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+import re
 from sklearn.decomposition import PCA
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
-from scipy.stats import ttest_ind
+import plotly.express as px
+from scipy.stats import ttest_ind, linregress
+from fpdf import FPDF
 from pyteomics import mzml
 import os
 import gc
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="TLL Metabo-Discovery", layout="wide", page_icon="🧪")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Metabo-Cleaner Pro | Enterprise", layout="wide")
 
-# --- 1. SIDEBAR: PROFESSIONAL FRAMING & PRIVACY ---
-st.sidebar.title(" TLL Metabo-Discovery")
-st.sidebar.info("""
-**Research Information**  
-This suite provides a standardized, high-throughput pipeline for untargeted metabolomics discovery.
-""")
+# --- GLOBAL SETTINGS ---
+contact_email = "abass.metabo@gmail.com"
+payment_url = "https://sandbox.flutterwave.com/donate/rgxclpstozwl"
 
-st.sidebar.markdown("---")
-st.sidebar.subheader(" Data Privacy")
-st.sidebar.caption("""
-Files are processed in-memory and are **not stored** on the server. 
-All data is purged immediately upon closing the session.
-""")
+# --- 2. SIDEBAR (Formal & Professional) ---
+st.sidebar.title("Metabo-Cleaner Pro")
+st.sidebar.info("Enterprise Discovery Suite: Machine Learning & Lead Prioritization.")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader(" How to Cite")
-st.sidebar.caption("""
-If this tool is used for publication, please cite:  
-*Yusuf, A. (2026). TLL Metabo-Discovery: An Integrated Pipeline for Machine-Learning Validated Metabolomics.*
-""")
+st.sidebar.subheader("Contact & Support")
+contact_url = f"mailto:{contact_email}?subject=Enterprise%20Inquiry"
+st.sidebar.markdown(f"[Email Lead Architect]({contact_url})")
+if st.sidebar.button("Show Email Address"):
+    st.sidebar.code(contact_email)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Developed by Abass Yusuf | Lab Discovery Suite v1.0")
+st.sidebar.subheader("Research Fund")
+st.sidebar.markdown(f"[Sponsor Development]({payment_url})")
 
-# --- HEADER ---
-st.title(" TLL Metabo-Discovery: Professional Analytics Suite")
+st.sidebar.markdown("---")
+st.sidebar.caption(f"© 2026 Yusuf Bioinformatics | {contact_email}")
+
+# --- 3. HELPER: PDF GENERATOR ---
+def create_pdf_report(g1, g2, feat_count, accuracy, leads_count):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Discovery & Lead Prioritization Report", ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, "1. Executive Summary", ln=True)
+    pdf.set_font("Helvetica", "", 11)
+    summary = (f"The analysis successfully identified metabolic differences between {g1} and {g2}. "
+               f"Processed {feat_count} high-quality features. "
+               f"Prioritization identified {leads_count} drug-like candidates (< 500 Da). "
+               f"Machine Learning validation score: {accuracy:.1%}.")
+    pdf.multi_cell(0, 10, summary)
+    return bytes(pdf.output())
+
+# --- 4. MAIN INTERFACE ---
+st.title("Metabo-Cleaner Pro: Enterprise Discovery Suite")
 st.markdown("---")
 
-# --- STEP 1: INPUT MODE ---
-mode = st.radio("Select Analysis Stage:", 
-                ("Raw Data (.mzML) - Batch Feature Extraction", "Quantified Data (.csv) - Discovery Dashboard"),
-                help="Choose 'Raw Data' to process .mzML files or 'Quantified Data' if you have a peak table.")
+mode = st.radio("Select Analysis Module:", 
+                ("Raw Data Processor", "Drug Discovery & Machine Learning Dashboard"))
 
 # ============================================
-# MODE 1: BATCH RAW DATA PROCESSING
+# MODULE 1: RAW DATA PROCESSOR
 # ============================================
-if mode == "Raw Data (.mzML) - Batch Feature Extraction":
-    st.markdown("### Step 1: Upload Batch .mzML files")
-    uploaded_mzmls = st.file_uploader("Select multiple .mzML files (up to 5GB)", type=["mzml"], accept_multiple_files=True)
-    
-    if uploaded_mzmls:
-        st.success(f"Ready to process {len(uploaded_mzmls)} files.")
-        if st.button(" Start Batch Extraction"):
-            all_features = []
-            progress_bar = st.progress(0)
-            status = st.empty()
-            
-            for i, uploaded_file in enumerate(uploaded_mzmls):
-                status.text(f"Extracting Chromatogram from {uploaded_file.name} ({i+1}/{len(uploaded_mzmls)})")
-                with open("temp.mzml", "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                rows = []
-                try:
-                    with mzml.read("temp.mzml") as reader:
-                        for spec in reader:
-                            if spec['ms level'] == 1 and len(spec['intensity array']) > 0:
-                                mzs, ints = spec['m/z array'], spec['intensity array']
-                                base_idx = np.argmax(ints)
-                                rows.append([float(mzs[base_idx]), float(spec['scanList']['scan'][0]['scan start time'])/60, float(ints[base_idx])])
-                    
-                    df_s = pd.DataFrame(rows, columns=["m/z", "RT_min", "Intensity"])
-                    df_s["Sample"] = uploaded_file.name.replace(".mzML", "")
-                    all_features.append(df_s)
-                    del rows; gc.collect() 
-                except Exception as e:
-                    st.error(f"Error in {uploaded_file.name}: {e}")
-                
-                progress_bar.progress((i + 1) / len(uploaded_mzmls))
-
-            df_combined = pd.concat(all_features, ignore_index=True)
-            st.success("Extraction Complete!")
-            st.download_button(" Download Combined Table (.csv)", 
-                               df_combined.to_csv(index=False).encode('utf-8'), 
-                               "combined_features_raw.csv")
-            if os.path.exists("temp.mzml"): os.remove("temp.mzml")
+if mode == "Raw Data Processor":
+    st.subheader("Batch Feature Extraction")
+    uploaded_mzmls = st.file_uploader("Select .mzML files", type=["mzml"], accept_multiple_files=True)
+    if uploaded_mzmls and st.button("Start Extraction"):
+        all_features = []
+        p_bar = st.progress(0)
+        status = st.empty()
+        for i, file in enumerate(uploaded_mzmls):
+            status.text(f"Processing: {file.name}")
+            with open("temp.mzml", "wb") as f: f.write(file.getbuffer())
+            rows = []
+            try:
+                with mzml.read("temp.mzml") as reader:
+                    for spec in reader:
+                        if spec['ms level'] == 1 and len(spec['intensity array']) > 0:
+                            idx = np.argmax(spec['intensity array'])
+                            rows.append([float(spec['m/z array'][idx]), float(spec['scanList']['scan'][0]['scan start time'])/60, float(spec['intensity array'][idx])])
+                df_s = pd.DataFrame(rows, columns=["m/z", "RT_min", "Intensity"])
+                df_s["Sample"] = file.name.replace(".mzML", "")
+                all_features.append(df_s)
+                del rows; gc.collect() 
+            except Exception as e: st.error(f"Error in {file.name}: {e}")
+            p_bar.progress((i + 1) / len(uploaded_mzmls))
+        st.success("Extraction Complete.")
+        st.download_button("Download Table", pd.concat(all_features).to_csv(index=False).encode('utf-8'), "metabo_features.csv")
+        if os.path.exists("temp.mzml"): os.remove("temp.mzml")
 
 # ============================================
-# MODE 2: DISCOVERY DASHBOARD
+# MODULE 2: DISCOVERY DASHBOARD
 # ============================================
 else:
-    uploaded_csv = st.file_uploader("Upload Combined/Merged Table (.csv)", type=["csv"])
-    
-    if uploaded_csv:
-        df_input = pd.read_csv(uploaded_csv)
-        
-        with st.expander(" Advanced Data Cleaning & Discovery Settings"):
+    uploaded_file = st.file_uploader("Upload Quantified Table (.csv)", type=["csv"])
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        with st.expander("Advanced Configuration"):
             c1, c2, c3, c4 = st.columns(4)
-            mz_c = c1.selectbox("m/z Column", df_input.columns, index=0)
-            rt_c = c2.selectbox("RT Column", df_input.columns, index=1 if "RT_min" not in df_input.columns else df_input.columns.get_loc("RT_min"))
-            sm_c = c3.selectbox("Sample ID", df_input.columns, index=df_input.columns.get_loc("Sample") if "Sample" in df_input.columns else 0)
-            in_c = c4.selectbox("Intensity", df_input.columns, index=df_input.columns.get_loc("Intensity") if "Intensity" in df_input.columns else 2)
-            
-            f1, f2, f3, f4 = st.columns(4)
-            mz_bin = f1.slider("m/z Alignment", 1, 4, 3)
-            min_pres = f2.slider("Min Presence (%)", 0, 100, 80)
-            impute_on = f3.checkbox("Impute Gaps (Half-Min)", value=True)
-            p_thresh = f4.number_input("P-value Significance", 0.05)
+            mz_col = c1.selectbox("m/z Column", df.columns, index=0)
+            rt_col = c2.selectbox("RT Column", df.columns, index=1 if "RT_min" not in df.columns else df.columns.get_loc("RT_min"))
+            sm_col = c3.selectbox("Sample ID", df.columns, index=df.columns.get_loc("Sample") if "Sample" in df.columns else 0)
+            in_col = c4.selectbox("Intensity", df.columns, index=df.columns.get_loc("Intensity") if "Intensity" in df.columns else 2)
+            mz_bin = st.slider("m/z Alignment", 1, 5, 3)
+            min_pres = st.slider("Min Presence (%)", 0, 100, 80)
+            ion_mode = st.selectbox("Polarity", ["Negative [M-H]-", "Positive [M+H]+"])
+            scaling = st.selectbox("Scaling", ["Pareto Scaling", "Auto-Scaling", "None"])
+            dose_map = st.text_input("Dose Settings (Format -> Group:Value, Group:Value)", placeholder="e.g., APL:0, MCL:100")
 
-            # --- ADDED: POLARITY SELECTOR ---
-            st.markdown("---")
-            ion_mode = st.selectbox("Ionization Polarity (for Structure Search)", ["Negative [M-H]-", "Positive [M+H]+"])
-
-        if st.button(" Run Discovery Pipeline"):
+        if st.button("Run Enterprise Discovery Pipeline"):
             try:
-                # 1. CLEANING & ALIGNMENT
-                df_input['ID'] = df_input[mz_c].round(mz_bin).astype(str) + " | RT=" + df_input[rt_c].round(2).astype(str)
-                pivot = df_input.pivot_table(index='ID', columns=sm_c, values=in_c, aggfunc='mean').fillna(0)
+                # 1. CLEANING ENGINE
+                df['Temp_ID'] = df[mz_col].round(mz_bin).astype(str) + "_" + df[rt_col].round(2).astype(str)
+                pivot = df.pivot_table(index='Temp_ID', columns=sm_col, values=in_col, aggfunc='mean').fillna(0)
+                cleaned = pivot[(pivot != 0).sum(axis=1) >= (min_pres/100)*len(pivot.columns)]
+                if cleaned.empty: st.error("No features left. Lower 'Min Presence'."); st.stop()
                 
-                thresh = (min_pres/100) * len(pivot.columns)
-                cleaned = pivot[(pivot != 0).sum(axis=1) >= thresh]
+                tic_norm = cleaned.replace(0, (cleaned[cleaned > 0].min().min()) / 2).div(cleaned.sum(axis=0), axis=1) * 1000000 
+                tic_norm = tic_norm[tic_norm.std(axis=1) > 0]
+
+                # 2. STATS & ML
+                groups = [str(s).split('_')[0] for s in tic_norm.columns]
+                unique_g = sorted(list(set(groups)))
+                X = tic_norm.T
+                if scaling == "Pareto Scaling": X_s = (X - X.mean()) / np.sqrt(X.std().replace(0, np.nan))
+                else: X_s = (X - X.mean()) / X.std()
+                pca_res = PCA(n_components=2).fit_transform(X_s.fillna(0))
                 
-                if cleaned.empty:
-                    st.error("❌ No data left after filtering! Please lower 'Min Presence (%)'.")
-                    st.stop()
+                # Discovery Calcs
+                g1_c, g2_c = [c for c in tic_norm.columns if c.startswith(unique_g[0])], [c for c in tic_norm.columns if c.startswith(unique_g[1])]
+                _, pvals = ttest_ind(tic_norm[g1_c], tic_norm[g2_c], axis=1)
+                log2fc = np.log2(tic_norm[g2_c].mean(axis=1) / tic_norm[g1_c].mean(axis=1).replace(0, 0.001))
+                stats_df = pd.DataFrame({'ID': tic_norm.index, 'p': pvals, 'log10p': -np.log10(pvals), 'Log2FC': log2fc}).reset_index(drop=True)
+                stats_df['Significant'] = (stats_df['p'] < 0.05) & (abs(stats_df['Log2FC']) > 1)
+                acc = cross_val_score(RandomForestClassifier(), X_s.fillna(0), [1 if g == unique_g[-1] else 0 for g in groups], cv=3).mean()
 
-                if impute_on:
-                    min_val = cleaned[cleaned > 0].min().min()
-                    data_final = cleaned.replace(0, min_val / 2)
-                else:
-                    data_final = cleaned
+                # Dose Response
+                dose_ready = False
+                if dose_map and ":" in dose_map:
+                    try:
+                        d_dict = {item.split(":")[0].strip(): float(item.split(":")[1].strip()) for item in dose_map.split(",")}
+                        sample_doses = [float(d_dict.get(g, 0)) for g in groups]
+                        if len(set(sample_doses)) > 1:
+                            r_values = [linregress(sample_doses, tic_norm.iloc[i].values)[2]**2 for i in range(len(tic_norm))]
+                            stats_df['Dose_R2'] = r_values
+                            dose_ready = True
+                    except: st.warning("Dose format error.")
+
+                # TABS
+                t1, t2, t3, t4, t5 = st.tabs(["📊 Quality", "🔵 Multivariate", "🌋 Volcano", "💊 Identification & Leads", "📋 Report"])
                 
-                data_norm = data_final.div(data_final.sum(axis=0), axis=1) * 1000000
+                with t1: st.plotly_chart(px.box(X.melt(), y='value', title="Data Distribution"), use_container_width=True)
+                with t2: st.plotly_chart(px.scatter(x=pca_res[:,0], y=pca_res[:,1], color=groups, title="Group Separation"), use_container_width=True)
+                with t3: st.plotly_chart(px.scatter(stats_df, x='Log2FC', y='log10p', color='Significant', hover_name='ID', title="Discovery Map"), use_container_width=True)
                 
-                # 2. MATH
-                X_raw = data_norm.T
-                X_z = (X_raw - X_raw.mean()) / X_raw.std()
-                X_p = (X_raw - X_raw.mean()) / np.sqrt(X_raw.std().replace(0, np.nan))
-                X_z, X_p = X_z.fillna(0), X_p.fillna(0)
+                with t4:
+                    st.subheader("Identification & Confidence Scoring")
+                    hits = stats_df[stats_df['Significant']].copy()
+                    hits['m/z'] = hits['ID'].apply(lambda x: float(x.split('_')[0]))
+                    hits['Neutral Mass'] = (hits['m/z'] + 1.0078) if ion_mode.startswith("Neg") else (hits['m/z'] - 1.0078)
+                    hits['Lipinski_MW'] = hits['Neutral Mass'] < 500
+                    
+                    # --- THE CONFIDENCE SCORING LOGIC ---
+                    def assign_confidence(row):
+                        score = 4 # Default: Mass Match Only
+                        if row['Significant']: score = 3 # Confirmed significant difference
+                        if row['Lipinski_MW']: score = 2 # Drug-like candidate
+                        if dose_ready and row.get('Dose_R2', 0) > 0.7: score = 1 # High Potency Responder
+                        return f"Level {score}"
+
+                    hits['Confidence'] = hits.apply(assign_confidence, axis=1)
+                    hits['PubChem'] = hits['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
+                    
+                    st.metric("Total High-Confidence Leads", len(hits[hits['Confidence'] == "Level 1"]))
+                    
+                    st.dataframe(hits[['ID', 'Neutral Mass', 'Confidence', 'Log2FC', 'PubChem']], 
+                                 column_config={"PubChem": st.column_config.LinkColumn("Search Isomers")})
+                    
+                    st.info("💡 Confidence Levels: L1 (Potency/Dose Confirmed), L2 (Drug-like), L3 (Statistically Significant), L4 (Mass Match only).")
+
+                with t5:
+                    pdf_bytes = create_pdf_report(unique_g[0], unique_g[1], len(stats_df[stats_df['Significant']]), acc, len(hits[hits['Lipinski_MW']]))
+                    st.download_button(label="Download Professional PDF Report", data=pdf_bytes, file_name="Discovery_Report.pdf", mime="application/pdf")
                 
-                groups = [str(s).split('_')[0] for s in X_raw.index]
-                unique_groups = sorted(list(set(groups)))
-
-                # 3. VISUALIZATION TABS
-                tabs = st.tabs(["📊 Distributions", "📈 Group Means", "🔵 PCA Gallery", "🎯 PLS-DA Suite", "🌋 Volcano Plot", "🏆 Top Biomarkers", "🔥 Heatmap"])
-
-                with tabs[0]:
-                    cols = st.columns(3)
-                    cols[0].plotly_chart(px.box(X_raw.melt(), y='value', title="TIC Normalized"))
-                    cols[1].plotly_chart(px.box(X_z.melt(), y='value', title="Z-score Scaled"))
-                    cols[2].plotly_chart(px.box(X_p.melt(), y='value', title="Pareto Scaled"))
-
-                with tabs[1]:
-                    mean_data = pd.DataFrame({'Group': groups, 'Mean': X_raw.mean(axis=1)})
-                    st.plotly_chart(px.bar(mean_data.groupby('Group').mean().reset_index(), x='Group', y='Mean', color='Group', error_y=mean_data.groupby('Group').std()['Mean'], title="Global Group Means ± SD"))
-
-                with tabs[2]:
-                    p_cols = st.columns(2)
-                    scaling_types = [("Raw (TIC)", X_raw), ("Pareto", X_p), ("Z-score", X_z), ("Log10", np.log10(X_raw + 1))]
-                    for i, (name, d_set) in enumerate(scaling_types):
-                        pca_res = PCA(n_components=2).fit_transform(d_set)
-                        p_cols[i%2].plotly_chart(px.scatter(x=pca_res[:,0], y=pca_res[:,1], color=groups, title=f"PCA: {name}"), use_container_width=True)
-
-                with tabs[3]:
-                    if len(unique_groups) >= 2:
-                        y_labels = [1 if g == unique_groups[-1] else 0 for g in groups]
-                        pls = PLSRegression(n_components=2).fit(X_p, y_labels)
-                        pl1, pl2 = st.columns(2)
-                        pl1.plotly_chart(px.scatter(x=pls.x_scores_[:,0], y=pls.x_scores_[:,1], color=groups, title="PLS-DA Scores"))
-                        pl2.plotly_chart(px.scatter(x=pls.x_loadings_[:,0], y=pls.x_loadings_[:,1], title="PLS-DA Loadings", opacity=0.4))
-
-                with tabs[4]:
-                    if len(unique_groups) >= 2:
-                        g1_m, g2_m = [g == unique_groups[0] for g in groups], [g == unique_groups[1] for g in groups]
-                        log2fc = np.log2(X_raw[g2_m].mean() / X_raw[g1_m].mean().replace(0, 0.001))
-                        _, pvals = ttest_ind(X_raw[g1_m], X_raw[g2_m], axis=0)
-                        vol_df = pd.DataFrame({'ID': X_raw.columns, 'Log2FC': log2fc, 'p': pvals, 'log10p': -np.log10(pvals)})
-                        vol_df['Significant'] = (vol_df['p'] < p_thresh) & (abs(vol_df['Log2FC']) > 1)
-                        st.plotly_chart(px.scatter(vol_df, x='Log2FC', y='log10p', color='Significant', hover_name='ID', color_discrete_map={True:'red', False:'gray'}, title="Discovery Map"), use_container_width=True)
-
-                with tabs[5]:
-                    st.subheader("Predictive Biomarkers & Identification")
-                    sig_hits = vol_df[vol_df['Significant']].sort_values('p')
-                    
-                    # --- ADDED: STRUCTURE DETERMINATION LOGIC ---
-                    results_table = sig_hits.copy()
-                    # Extract m/z from ID
-                    results_table['m/z'] = results_table['ID'].apply(lambda x: float(x.split(' | ')[0]))
-                    
-                    # Calculate Neutral Mass
-                    if ion_mode == "Negative [M-H]-":
-                        results_table['Neutral Mass'] = (results_table['m/z'] + 1.0078).round(4)
-                    else:
-                        results_table['Neutral Mass'] = (results_table['m/z'] - 1.0078).round(4)
-                    
-                    # Create PubChem search URL
-                    results_table['Structure Search'] = results_table['m/z'].apply(lambda x: f"https://pubchem.ncbi.nlm.nih.gov/#query={x}")
-                    
-                    st.dataframe(
-                        results_table[['ID', 'm/z', 'Neutral Mass', 'Log2FC', 'p', 'Structure Search']],
-                        column_config={
-                            "Structure Search": st.column_config.LinkColumn("Identify (PubChem)")
-                        },
-                        use_container_width=True
-                    )
-                    
-                    st.markdown("---")
-                    y_ml = [1 if g == unique_groups[-1] else 0 for g in groups]
-                    acc = cross_val_score(RandomForestClassifier(), X_p, y_ml, cv=3).mean()
-                    st.metric("Model Predictive Accuracy (Random Forest)", f"{acc:.1%}")
-
-                with tabs[6]:
-                    st.plotly_chart(px.imshow(X_p.T.head(100), aspect="auto", title="Top 100 Features Heatmap"), use_container_width=True)
-
                 st.balloons()
-            except Exception as e:
-                st.error(f"Analysis Error: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
 st.markdown("---")
-st.caption("Developed by Yusuf Bioinformatics | Laboratory Research Support")
+st.caption(f"Metabo-Cleaner Pro Enterprise | Pharmaceutical Discovery System | {contact_email}")
