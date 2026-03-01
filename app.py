@@ -16,21 +16,21 @@ import gc
 st.set_page_config(page_title="TLL Metabo-Discovery", layout="wide", page_icon="🧪")
 
 # --- 1. SIDEBAR: PROFESSIONAL FRAMING & PRIVACY ---
-st.sidebar.title("🧪 TLL Metabo-Discovery")
+st.sidebar.title(" TLL Metabo-Discovery")
 st.sidebar.info("""
 **Research Information**  
 This suite provides a standardized, high-throughput pipeline for untargeted metabolomics discovery.
 """)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔒 Data Privacy")
+st.sidebar.subheader(" Data Privacy")
 st.sidebar.caption("""
 Files are processed in-memory and are **not stored** on the server. 
 All data is cleared immediately upon closing the browser session.
 """)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📝 How to Cite")
+st.sidebar.subheader(" How to Cite")
 st.sidebar.caption("""
 If this tool is used for publication, please cite:  
 *Yusuf, A. (2026). TLL Metabo-Discovery: An Integrated Pipeline for Machine-Learning Validated Metabolomics.*
@@ -40,7 +40,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption("Developed by Abass Yusuf | Lab Discovery Suite v1.0")
 
 # --- HEADER ---
-st.title("🧪 TLL Metabo-Discovery: Professional Analytics Suite")
+st.title(" TLL Metabo-Discovery: Professional Analytics Suite")
 st.markdown("---")
 
 # --- STEP 1: INPUT MODE ---
@@ -57,7 +57,7 @@ if mode == "Raw Data (.mzML) - Batch Feature Extraction":
     
     if uploaded_mzmls:
         st.success(f"Ready to process {len(uploaded_mzmls)} files.")
-        if st.button("🚀 Start Batch Extraction"):
+        if st.button(" Start Batch Extraction"):
             all_features = []
             progress_bar = st.progress(0)
             status = st.empty()
@@ -90,7 +90,7 @@ if mode == "Raw Data (.mzML) - Batch Feature Extraction":
             st.success("Extraction Complete!")
             st.dataframe(df_combined.head(10))
             
-            st.download_button("📥 Download Combined Table (.csv)", 
+            st.download_button(" Download Combined Table (.csv)", 
                                df_combined.to_csv(index=False).encode('utf-8'), 
                                "combined_features_raw.csv",
                                help="Download this file to use in the Discovery Dashboard.")
@@ -105,7 +105,7 @@ else:
     if uploaded_csv:
         df_input = pd.read_csv(uploaded_csv)
         
-        with st.expander("🛠️ Advanced Data Cleaning & Discovery Settings"):
+        with st.expander(" Advanced Data Cleaning & Discovery Settings"):
             c1, c2, c3, c4 = st.columns(4)
             mz_c = c1.selectbox("m/z Column", df_input.columns, index=0)
             rt_c = c2.selectbox("RT Column", df_input.columns, index=1 if "RT_min" not in df_input.columns else df_input.columns.get_loc("RT_min"))
@@ -121,7 +121,7 @@ else:
             scaling_method = st.selectbox("Multivariate Scaling", ["Pareto Scaling", "Z-score (Auto-scale)", "None"], 
                                          help="Pareto scaling is recommended for biological data as it reduces high-magnitude bias.")
 
-        if st.button("🚀 Run Discovery Pipeline"):
+        if st.button(" Run Discovery Pipeline"):
             try:
                 # 1. CLEANING & ALIGNMENT
                 df_input['ID'] = df_input[mz_c].round(mz_bin).astype(str) + " | RT=" + df_input[rt_c].round(2).astype(str)
@@ -154,7 +154,7 @@ else:
                 unique_groups = sorted(list(set(groups)))
 
                 # 3. VISUALIZATION TABS
-                tabs = st.tabs(["📊 Distributions", "📈 Group Means", "🔵 PCA Gallery", "🎯 PLS-DA Suite", "🌋 Volcano Plot", "🏆 Top Biomarkers", "🔥 Heatmap"])
+                tabs = st.tabs([" Distributions", " Group Means", "  PCA Gallery", " PLS-DA Suite", " Volcano Plot", " Top Biomarkers", " Heatmap"])
 
                 with tabs[0]:
                     st.subheader("Data Distribution (Quality Check)")
@@ -199,7 +199,7 @@ else:
                     st.subheader("Predictive Biomarker Table")
                     sig_hits = vol_df[vol_df['Significant']].sort_values('p')
                     st.dataframe(sig_hits)
-                    st.download_button("📥 Export Biomarker List (CSV)", sig_hits.to_csv(index=False).encode('utf-8'), "discovery_results.csv")
+                    st.download_button(" Export Biomarker List (CSV)", sig_hits.to_csv(index=False).encode('utf-8'), "discovery_results.csv")
                     
                     y_ml = [1 if g == unique_groups[-1] else 0 for g in groups]
                     acc = cross_val_score(RandomForestClassifier(), X_p, y_ml, cv=3).mean()
